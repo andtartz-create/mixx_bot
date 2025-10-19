@@ -1,5 +1,5 @@
 import os
-import json
+import requests
 from flask import Flask, request
 from telegram import Bot, Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
@@ -36,8 +36,7 @@ def sms():
     except Exception as e:
         return {"status": "error", "error": str(e)}, 500
 
-# --- Устанавливаем webhook в Telegram при старте ---
-@app.before_first_request
+# --- Устанавливаем webhook в Telegram вручную перед запуском Flask ---
 def set_webhook():
     bot = Bot(BOT_TOKEN)
     url = f"{os.environ.get('RENDER_EXTERNAL_URL')}{WEBHOOK_PATH}"
@@ -46,4 +45,5 @@ def set_webhook():
     print("Webhook установлен:", url)
 
 if __name__ == "__main__":
+    set_webhook()  # вызываем перед запуском Flask
     app.run(host="0.0.0.0", port=PORT)
