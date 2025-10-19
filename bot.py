@@ -1,49 +1,65 @@
 import os
-import requests
+import json
+import asyncio
 from flask import Flask, request
 from telegram import Bot, Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
+# --- НАСТРОЙКИ ---
+BOT_TOKEN = os.environ.get("BOT_TOKEN")  # Секретный токен от @BotFather
+WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
 PORT = int(os.environ.get("PORT", 10000))
 
-WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"  # уникальный путь для безопасности
+# URL вашей Google Apps Script (для записи в Google Таблицу)
+GOOGLE_SCRIPT_URL = os.environ.get("GOOGLE_SCRIPT_URL")  
 
+# --- FLASK ---
 app = Flask(__name__)
 
-# --- Telegram bot ---
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Бот запущен!")
+@app.route("/", methods=["GET"])
+def index():
+    return "Бот работает! ✅", 200
 
-application = ApplicationBuilder().token(BOT_TOKEN).build()
-application.add_handler(CommandHandler("start", start))
-
-# --- Flask endpoint для Telegram webhook ---
 @app.route(WEBHOOK_PATH, methods=["POST"])
 def telegram_webhook():
-    update = Update.de_json(request.get_json(force=True), application.bot)
-    application.create_task(application.update_queue.put(update))
-    return "OK"
+    data = request.get_json(force=True)
+    update = Update.de_json(data, bot)
+    asyncio.run(application.update_queue.put(update))
+    return "OK", 200
 
-# --- Flask endpoint для SMS ---
 @app.route("/sms", methods=["POST"])
-def sms():
-    data = request.get_json()
-    WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # Google Apps Script
+def sms_post():
+    """Принимаем POST от Tasker/смс и отправляем в Google Таблицу"""
     try:
-        requests.post(WEBHOOK_URL, json=data)
-        return {"status": "ok"}, 200
+        data = request.get_json(force=True)
+        # POST в Google Apps Script
+        import requests
+        requests.post(GOOGLE_SCRIPT_URL, json=data)
+        return {"status": "success"}, 200
     except Exception as e:
         return {"status": "error", "error": str(e)}, 500
 
-# --- Устанавливаем webhook в Telegram вручную перед запуском Flask ---
+# --- TELEGRAM HANDLERS ---
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Привет! Бот работает ✅")
+
+async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(f"Вы написали: {update.message.text}")
+
+# --- ИНИЦИАЛИЗАЦИЯ БОТА ---
+bot = Bot(BOT_TOKEN)
+application = ApplicationBuilder().bot(bot).build()
+application.add_handler(CommandHandler("start", start))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
+
+# --- УСТАНОВКА WEBHOOK ---
 def set_webhook():
-    bot = Bot(BOT_TOKEN)
     url = f"{os.environ.get('RENDER_EXTERNAL_URL')}{WEBHOOK_PATH}"
-    bot.delete_webhook()
-    bot.set_webhook(url)
+    asyncio.run(bot.delete_webhook())
+    asyncio.run(bot.set_webhook(url))
     print("Webhook установлен:", url)
 
-if __name__ == "__main__":
-    set_webhook()  # вызываем перед запуском Flask
-    app.run(host="0.0.0.0", port=PORT)
+set_webhook()
+
+# --- ЗАПУСК FLASK ---
+if __na
