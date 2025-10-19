@@ -1,65 +1,47 @@
 import os
 import json
-import asyncio
-from flask import Flask, request
-from telegram import Bot, Update
-from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
+from flask import Flask, request, Response
+from telegram import Update, Bot
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# --- НАСТРОЙКИ ---
-BOT_TOKEN = os.environ.get("BOT_TOKEN")  # Секретный токен от @BotFather
-WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"
-PORT = int(os.environ.get("PORT", 10000))
+# --- Параметры ---
+BOT_TOKEN = os.environ.get("BOT_TOKEN")  # Установи в Render как переменную окружения
+PORT = int(os.environ.get("PORT", "10000"))
+WEBHOOK_URL = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/webhook/{BOT_TOKEN}"
 
-# URL вашей Google Apps Script (для записи в Google Таблицу)
-GOOGLE_SCRIPT_URL = os.environ.get("GOOGLE_SCRIPT_URL")  
-
-# --- FLASK ---
+# --- Flask ---
 app = Flask(__name__)
 
-@app.route("/", methods=["GET"])
-def index():
-    return "Бот работает! ✅", 200
-
-@app.route(WEBHOOK_PATH, methods=["POST"])
-def telegram_webhook():
-    data = request.get_json(force=True)
-    update = Update.de_json(data, bot)
-    asyncio.run(application.update_queue.put(update))
-    return "OK", 200
-
-@app.route("/sms", methods=["POST"])
-def sms_post():
-    """Принимаем POST от Tasker/смс и отправляем в Google Таблицу"""
-    try:
-        data = request.get_json(force=True)
-        # POST в Google Apps Script
-        import requests
-        requests.post(GOOGLE_SCRIPT_URL, json=data)
-        return {"status": "success"}, 200
-    except Exception as e:
-        return {"status": "error", "error": str(e)}, 500
-
-# --- TELEGRAM HANDLERS ---
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Привет! Бот работает ✅")
-
-async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(f"Вы написали: {update.message.text}")
-
-# --- ИНИЦИАЛИЗАЦИЯ БОТА ---
+# --- Telegram ---
+application = ApplicationBuilder().token(BOT_TOKEN).build()
 bot = Bot(BOT_TOKEN)
-application = ApplicationBuilder().bot(bot).build()
+
+# --- Команды бота ---
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Привет! Я бот.")
+
 application.add_handler(CommandHandler("start", start))
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
-# --- УСТАНОВКА WEBHOOK ---
+# --- Webhook ---
+@app.route(f"/webhook/{BOT_TOKEN}", methods=["POST"])
+def webhook():
+    try:
+        update = Update.de_json(request.get_json(force=True), bot)
+        application.update_queue.put(update)
+    except Exception as e:
+        print(f"Ошибка обработки update: {e}")
+    return Response("OK", status=200)
+
+# --- Настройка вебхука при старте ---
+@app.before_first_request
 def set_webhook():
-    url = f"{os.environ.get('RENDER_EXTERNAL_URL')}{WEBHOOK_PATH}"
-    asyncio.run(bot.delete_webhook())
-    asyncio.run(bot.set_webhook(url))
-    print("Webhook установлен:", url)
+    import asyncio
+    async def main():
+        await bot.delete_webhook()
+        await bot.set_webhook(WEBHOOK_URL)
+        print(f"Webhook установлен: {WEBHOOK_URL}")
+    asyncio.run(main())
 
-set_webhook()
-
-# --- ЗАПУСК FLASK ---
-if __na
+# --- Запуск Flask ---
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=PORT)
