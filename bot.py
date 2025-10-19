@@ -3,6 +3,7 @@ import json
 from flask import Flask, request, Response
 from telegram import Update, Bot
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+import asyncio
 
 # --- Параметры ---
 BOT_TOKEN = os.environ.get("BOT_TOKEN")  # Установи в Render как переменную окружения
@@ -33,9 +34,8 @@ def webhook():
     return Response("OK", status=200)
 
 # --- Настройка вебхука при старте ---
-@app.before_first_request
-def set_webhook():
-    import asyncio
+@app.before_serving
+def setup_webhook():
     async def main():
         await bot.delete_webhook()
         await bot.set_webhook(WEBHOOK_URL)
