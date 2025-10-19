@@ -1,27 +1,15 @@
 import os
 import json
 from flask import Flask, request
-import requests
-from telegram import Update
+from telegram import Bot, Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-import threading
 
-# --- Переменные из Render Secrets ---
-BOT_TOKEN = os.environ.get("BOT_TOKEN")  # Токен бота от BotFather
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # URL Google Apps Script
-PORT = int(os.environ.get("PORT", 10000))  # Render требует переменную PORT
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+PORT = int(os.environ.get("PORT", 10000))
 
-# --- Flask app для приема POST ---
+WEBHOOK_PATH = f"/webhook/{BOT_TOKEN}"  # уникальный путь для безопасности
+
 app = Flask(__name__)
-
-@app.route("/sms", methods=["POST"])
-def sms():
-    data = request.get_json()
-    try:
-        requests.post(WEBHOOK_URL, json=data)
-        return {"status": "ok"}, 200
-    except Exception as e:
-        return {"status": "error", "error": str(e)}, 500
 
 # --- Telegram bot ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -30,7 +18,32 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 application = ApplicationBuilder().token(BOT_TOKEN).build()
 application.add_handler(CommandHandler("start", start))
 
-# --- Запуск Flask и Telegram одновременно ---
+# --- Flask endpoint для Telegram webhook ---
+@app.route(WEBHOOK_PATH, methods=["POST"])
+def telegram_webhook():
+    update = Update.de_json(request.get_json(force=True), application.bot)
+    application.create_task(application.update_queue.put(update))
+    return "OK"
+
+# --- Flask endpoint для SMS ---
+@app.route("/sms", methods=["POST"])
+def sms():
+    data = request.get_json()
+    WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # Google Apps Script
+    try:
+        requests.post(WEBHOOK_URL, json=data)
+        return {"status": "ok"}, 200
+    except Exception as e:
+        return {"status": "error", "error": str(e)}, 500
+
+# --- Устанавливаем webhook в Telegram при старте ---
+@app.before_first_request
+def set_webhook():
+    bot = Bot(BOT_TOKEN)
+    url = f"{os.environ.get('RENDER_EXTERNAL_URL')}{WEBHOOK_PATH}"
+    bot.delete_webhook()
+    bot.set_webhook(url)
+    print("Webhook установлен:", url)
+
 if __name__ == "__main__":
-    threading.Thread(target=application.run_polling, daemon=True).start()
     app.run(host="0.0.0.0", port=PORT)
