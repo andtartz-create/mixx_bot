@@ -1,47 +1,58 @@
 import os
+import re
 import json
-from flask import Flask, request, Response
-from telegram import Update, Bot
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-import asyncio
+import requests
+from flask import Flask, request
+from telegram import Bot, Update
+from telegram.ext import Dispatcher, MessageHandler, Filters
 
-# --- Параметры ---
-BOT_TOKEN = os.environ.get("BOT_TOKEN")  # Установи в Render как переменную окружения
-PORT = int(os.environ.get("PORT", "10000"))
-WEBHOOK_URL = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/webhook/{BOT_TOKEN}"
+# === НАСТРОЙКИ ===
+TOKEN = os.environ.get("BOT_TOKEN")  # токен Telegram
+SHEET_URL = os.environ.get("SHEET_URL")  # URL скрипта Google Apps Script (Web App)
+PORT = int(os.environ.get("PORT", 10000))
 
-# --- Flask ---
+bot = Bot(token=TOKEN)
 app = Flask(__name__)
 
-# --- Telegram ---
-application = ApplicationBuilder().token(BOT_TOKEN).build()
-bot = Bot(BOT_TOKEN)
+# === ФУНКЦИЯ ПАРСИНГА SMS ===
+def parse_sms(text):
+    pattern = r"Umepokea TSh ([\d,]+).*?kwa (Wakala - )?([^,;]+).*?Salio.*?ni TSh ([\d,]+)"
+    matches = re.findall(pattern, text)
+    payments = []
+    for m in matches:
+        amount = m[0].replace(",", "")
+        wakala = m[2].strip()
+        balance = m[3].replace(",", "")
+        payments.append({
+            "amount": amount,
+            "wakala": wakala,
+            "balance": balance
+        })
+    return payments
 
-# --- Команды бота ---
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Привет! Я бот.")
 
-application.add_handler(CommandHandler("start", start))
-
-# --- Webhook ---
-@app.route(f"/webhook/{BOT_TOKEN}", methods=["POST"])
-def webhook():
+# === ОТПРАВКА ДАННЫХ В GOOGLE SHEETS ===
+def send_to_sheet(payment):
     try:
-        update = Update.de_json(request.get_json(force=True), bot)
-        application.update_queue.put(update)
+        requests.post(SHEET_URL, json=payment, timeout=10)
     except Exception as e:
-        print(f"Ошибка обработки update: {e}")
-    return Response("OK", status=200)
+        print(f"Ошибка отправки в таблицу: {e}")
 
-# --- Настройка вебхука при старте ---
-@app.before_serving
-def setup_webhook():
-    async def main():
-        await bot.delete_webhook()
-        await bot.set_webhook(WEBHOOK_URL)
-        print(f"Webhook установлен: {WEBHOOK_URL}")
-    asyncio.run(main())
 
-# --- Запуск Flask ---
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=PORT)
+# === ОБРАБОТКА СООБЩЕНИЙ ===
+def handle_message(update, context):
+    text = update.message.text
+    payments = parse_sms(text)
+    if not payments:
+        update.message.reply_text("❌ Не найдено платежей в тексте.")
+        return
+    for p in payments:
+        send_to_sheet(p)
+    update.message.reply_text(f"✅ Добавлено {len(payments)} платежей в Google Sheets.")
+
+
+# === НАСТРОЙКА WEBHOOK ===
+@app.route(f"/webhook/{TOKEN}", methods=["POST"])
+def webhook():
+    update = Update.de_json(request.get_json(force=True), bot)
+    disp
