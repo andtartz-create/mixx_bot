@@ -6,6 +6,7 @@ import asyncio
 from flask import Flask, request
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
+application = Application.builder().token(TOKEN).updater(None).build()
 
 # === НАСТРОЙКИ ===
 TOKEN = os.environ.get("BOT_TOKEN")
@@ -80,3 +81,4 @@ async def setup_webhook():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=PORT)
+
