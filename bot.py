@@ -5,6 +5,7 @@ import requests
 from flask import Flask, request
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
+import asyncio
 
 TOKEN = os.environ.get("BOT_TOKEN")
 SHEET_URL = os.environ.get("SHEET_URL")
@@ -33,10 +34,8 @@ def send_to_sheet(payment):
     except Exception as e:
         print("Sheet error:", e)
 
-# === TELEGRAM APP ===
+# === TELEGRAM BOT APP ===
 application = Application.builder().token(TOKEN).updater(None).build()
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, 
-                                       lambda u, c: handle_message(u, c)))
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
@@ -50,7 +49,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         send_to_sheet(p)
     await update.message.reply_text(f"✅ Добавлено: {len(payments)}")
 
-# === WEBHOOK ROUTE ===
+application.add_handler(
+    MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
+)
+
+# === WEBHOOK ENDPOINT (SYNC!) ===
 @app.route(f"/webhook/{TOKEN}", methods=["POST"])
 def webhook():
     try:
@@ -63,21 +66,20 @@ def webhook():
 
 @app.route("/")
 def home():
-    return "Bot running!"
+    return "Bot OK!"
 
-# === START BOT ===
+# === START BOT & SET WEBHOOK ===
+async def init_bot():
+    await application.initialize()
+    await application.start()
+
+    webhook_url = f"https://{HOSTNAME}/webhook/{TOKEN}"
+    await application.bot.set_webhook(webhook_url)
+
+    print("Webhook set:", webhook_url)
+
+# Run bot init BEFORE flask
+asyncio.get_event_loop().run_until_complete(init_bot())
+
 if __name__ == "__main__":
-    import asyncio
-
-    async def init_bot():
-        await application.initialize()
-
-        webhook_url = f"https://{HOSTNAME}/webhook/{TOKEN}"
-        await application.bot.set_webhook(webhook_url)
-
-        print("Webhook set:", webhook_url)
-
-        await application.start()
-
-    asyncio.get_event_loop().run_until_complete(init_bot())
     app.run(host="0.0.0.0", port=PORT)
